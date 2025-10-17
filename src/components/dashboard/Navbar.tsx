@@ -6,9 +6,10 @@ export default function Navbar({ currentPage, onNavigate }: { currentPage: strin
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard' },
+    { id: 'ai-insights', label: 'AI Insights' },
+    { id: 'strategies', label: 'Strategies' },
     { id: 'wallets', label: 'Wallets' },
     { id: 'api', label: 'API' },
-    { id: 'strategies', label: 'Strategies' },
     { id: 'history', label: 'History' },
   ];
 

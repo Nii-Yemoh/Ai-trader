@@ -24,6 +24,8 @@ interface AISignal {
   stop_loss: number;
   timestamp: string;
   rationale: string;
+  technical_indicators?: any;
+  sentiment_analysis?: any;
 }
 
 Deno.serve(async (req: Request) => {
@@ -85,6 +87,7 @@ Deno.serve(async (req: Request) => {
       }
     );
   } catch (error) {
+    console.error("Error:", error);
     return new Response(
       JSON.stringify({ error: error.message }),
       {
@@ -106,7 +109,7 @@ async function analyzeMarket(
   supabase: any
 ): Promise<AISignal> {
   const { data: strategy } = await supabase
-    .from("trading_strategies")
+    .from("strategies")
     .select("*")
     .eq("id", strategyId)
     .eq("user_id", userId)
@@ -115,6 +118,10 @@ async function analyzeMarket(
   if (!strategy) {
     throw new Error("Strategy not found");
   }
+
+  const symbol = strategy.symbols && strategy.symbols.length > 0
+    ? strategy.symbols[0]
+    : 'BTC/USDT';
 
   const latestPrice = marketData.length > 0
     ? marketData[marketData.length - 1].close
@@ -125,7 +132,7 @@ async function analyzeMarket(
 
   const combinedScore = (technicalScore * 0.6) + (sentimentScore * 0.4);
 
-  const threshold = strategy.ai_model_config?.confidence_threshold || 0.7;
+  const threshold = 0.6;
   let action: 'BUY' | 'SELL' | 'HOLD' = 'HOLD';
 
   if (combinedScore > threshold) {
@@ -134,7 +141,7 @@ async function analyzeMarket(
     action = 'SELL';
   }
 
-  const confidence = Math.abs(combinedScore - 0.5) * 2;
+  const confidence = Math.min(0.95, Math.abs(combinedScore - 0.5) * 2);
 
   const volatility = calculateVolatility(marketData);
   const priceTarget = action === 'BUY'
@@ -149,17 +156,23 @@ async function analyzeMarket(
     ? latestPrice * (1 + strategy.stop_loss_percentage / 100)
     : latestPrice;
 
-  const modelType = strategy.ai_model_config?.model_type || 'LSTM';
-  const indicators = strategy.ai_model_config?.indicators || [];
+  const technicalIndicators = calculateTechnicalIndicators(marketData);
+  const sentimentAnalysis = {
+    overall_sentiment: combinedScore > 0.6 ? 'positive' : combinedScore < 0.4 ? 'negative' : 'neutral',
+    confidence: sentimentScore,
+    sources_analyzed: newsData.length
+  };
 
   return {
-    symbol: strategy.strategy_type === 'crypto' ? 'BTC/USDT' : 'EUR/USD',
+    symbol,
     action,
-    confidence: Math.min(0.95, confidence),
+    confidence,
     price_target: Number(priceTarget.toFixed(2)),
     stop_loss: Number(stopLoss.toFixed(2)),
     timestamp: new Date().toISOString(),
-    rationale: `${modelType} model analyzed market using ${indicators.join(', ') || 'technical indicators'}. Technical score: ${(technicalScore * 100).toFixed(1)}%, Sentiment: ${(sentimentScore * 100).toFixed(1)}%`,
+    rationale: `AI analysis using technical indicators and sentiment. Technical score: ${(technicalScore * 100).toFixed(1)}%, Sentiment: ${sentimentAnalysis.overall_sentiment}. Risk level: ${strategy.risk_level}`,
+    technical_indicators: technicalIndicators,
+    sentiment_analysis: sentimentAnalysis,
   };
 }
 
@@ -180,11 +193,68 @@ function calculateTechnicalScore(marketData: MarketData[]): number {
   return (trendScore + momentumScore) / 2;
 }
 
+function calculateTechnicalIndicators(marketData: MarketData[]) {
+  if (marketData.length < 14) {
+    return {
+      rsi: 50,
+      sma_20: marketData[marketData.length - 1]?.close || 50000,
+      sma_50: marketData[marketData.length - 1]?.close || 50000,
+      macd: 0,
+      volume_trend: 'neutral'
+    };
+  }
+
+  const closes = marketData.map(d => d.close);
+  const volumes = marketData.map(d => d.volume);
+
+  const rsi = calculateRSI(closes, 14);
+  const sma20 = closes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+  const sma50 = closes.slice(-50).reduce((a, b) => a + b, 0) / Math.min(50, closes.length);
+
+  const avgVolume = volumes.slice(-20).reduce((a, b) => a + b, 0) / 20;
+  const latestVolume = volumes[volumes.length - 1];
+  const volumeTrend = latestVolume > avgVolume ? 'increasing' : 'decreasing';
+
+  return {
+    rsi: Number(rsi.toFixed(2)),
+    sma_20: Number(sma20.toFixed(2)),
+    sma_50: Number(sma50.toFixed(2)),
+    macd: Number(((sma20 - sma50) / sma50 * 100).toFixed(2)),
+    volume_trend: volumeTrend
+  };
+}
+
+function calculateRSI(prices: number[], period: number = 14): number {
+  if (prices.length < period + 1) return 50;
+
+  let gains = 0;
+  let losses = 0;
+
+  for (let i = prices.length - period; i < prices.length; i++) {
+    const change = prices[i] - prices[i - 1];
+    if (change > 0) {
+      gains += change;
+    } else {
+      losses -= change;
+    }
+  }
+
+  const avgGain = gains / period;
+  const avgLoss = losses / period;
+
+  if (avgLoss === 0) return 100;
+
+  const rs = avgGain / avgLoss;
+  const rsi = 100 - (100 / (1 + rs));
+
+  return rsi;
+}
+
 function analyzeSentiment(newsData: string[]): number {
   if (newsData.length === 0) return 0.5;
 
-  const positiveWords = ['strong', 'bullish', 'increase', 'growth', 'positive', 'gains', 'rally', 'surge'];
-  const negativeWords = ['weak', 'bearish', 'decrease', 'decline', 'negative', 'losses', 'crash', 'drop'];
+  const positiveWords = ['strong', 'bullish', 'increase', 'growth', 'positive', 'gains', 'rally', 'surge', 'adoption'];
+  const negativeWords = ['weak', 'bearish', 'decrease', 'decline', 'negative', 'losses', 'crash', 'drop', 'fear'];
 
   let positiveCount = 0;
   let negativeCount = 0;
@@ -225,7 +295,7 @@ async function executeTrade(
   supabase: any
 ) {
   const { data: strategy } = await supabase
-    .from("trading_strategies")
+    .from("strategies")
     .select("*")
     .eq("id", strategyId)
     .eq("user_id", userId)
@@ -236,7 +306,7 @@ async function executeTrade(
   }
 
   const marketData = generateMockMarketData(50);
-  const newsData = ['Market shows positive momentum'];
+  const newsData = ['Market shows positive momentum', 'Institutional adoption increasing'];
 
   const signal = await analyzeMarket(userId, strategyId, marketData, newsData, supabase);
 
@@ -244,53 +314,22 @@ async function executeTrade(
     return { message: 'No trade signal, holding position', signal };
   }
 
-  if (signal.confidence < (strategy.ai_model_config?.confidence_threshold || 0.7)) {
+  if (signal.confidence < 0.6) {
     return { message: 'Confidence below threshold, skipping trade', signal };
   }
 
-  const { data: activeSessions } = await supabase
-    .from("trading_sessions")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("strategy_id", strategyId)
-    .eq("session_status", "active")
-    .limit(1)
-    .maybeSingle();
-
-  let sessionId = activeSessions?.id;
-
-  if (!sessionId) {
-    const { data: newSession } = await supabase
-      .from("trading_sessions")
-      .insert({
-        user_id: userId,
-        strategy_id: strategyId,
-        session_status: "active",
-      })
-      .select()
-      .single();
-
-    sessionId = newSession.id;
-  }
-
-  const quantity = strategy.max_investment_per_trade / signal.price_target;
+  const quantity = strategy.max_position_size / signal.price_target;
 
   const { data: trade, error: tradeError } = await supabase
     .from("trades")
     .insert({
       user_id: userId,
-      session_id: sessionId,
-      trade_type: signal.action.toLowerCase(),
-      asset_type: strategy.strategy_type,
+      strategy_id: strategyId,
       symbol: signal.symbol,
+      action: signal.action,
+      quantity: Number(quantity.toFixed(6)),
       entry_price: signal.price_target,
-      quantity,
-      ai_confidence_score: signal.confidence,
-      trade_status: "open",
-      trade_metadata: {
-        reasoning: signal.rationale,
-        strategy_name: strategy.strategy_name,
-      },
+      status: "pending",
     })
     .select()
     .single();

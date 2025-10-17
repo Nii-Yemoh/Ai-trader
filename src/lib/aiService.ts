@@ -17,6 +17,8 @@ export interface AISignal {
   stop_loss: number;
   timestamp: string;
   rationale: string;
+  technical_indicators?: any;
+  sentiment_analysis?: any;
 }
 
 export async function analyzeMarketWithAI(
@@ -87,3 +89,14 @@ export const sampleNewsData = [
   'Crypto market sentiment remains bullish amid regulatory clarity',
   'Major exchanges report record trading volumes',
 ];
+
+export async function analyzeTrading(_symbol: string, strategyId: string) {
+  try {
+    const marketData = generateMockMarketData(50);
+    const result = await analyzeMarketWithAI(strategyId, marketData, sampleNewsData);
+    return result;
+  } catch (error) {
+    console.error('Error analyzing trading:', error);
+    return null;
+  }
+}

@@ -9,6 +9,7 @@ import WalletsPage from './components/dashboard/WalletsPage';
 import ApiConnectionsPage from './components/dashboard/ApiConnectionsPage';
 import StrategiesPage from './components/dashboard/StrategiesPage';
 import TradeHistoryPage from './components/dashboard/TradeHistoryPage';
+import AIFeedbackPage from './components/dashboard/AIFeedbackPage';
 
 function AppContent() {
   const { user, loading } = useAuth();
@@ -44,6 +45,8 @@ function AppContent() {
     switch (currentPage) {
       case 'dashboard':
         return <DashboardHome />;
+      case 'ai-insights':
+        return <AIFeedbackPage />;
       case 'wallets':
         return <WalletsPage />;
       case 'api':
